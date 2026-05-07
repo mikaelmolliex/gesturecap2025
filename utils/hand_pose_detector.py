@@ -24,7 +24,7 @@ class TempHandLandmarks:
         self.landmark = landmark_list
 
 class HandPoseDetector:
-    def __init__(self, n_hands=1, device: str = 'gpu'):
+    def __init__(self, n_hands=1, device: str = 'cpu'):
         """
         Initializes the HandLandmarker.
 

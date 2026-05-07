@@ -120,8 +120,9 @@ def producer(shm_name0, shm_name1, cur_idx, stop_event, ts_value,
 def consumer(shm_name0, shm_name1, cur_idx, stop_event, ts_value,
              t_read_total_v, t_frameacq_v, t_getts_v, t_frameconv_v):
 
-    client   = udp_client.SimpleUDPClient(OSC_IP, OSC_PORT)
-    detector = HandPoseDetector(n_hands=2)
+    client = udp_client.SimpleUDPClient(OSC_IP, OSC_PORT)
+    detector = HandPoseDetector(n_hands=2, device="cpu")
+    print("HandPoseDetector initialisé (CPU)")
 
     shm0 = shared_memory.SharedMemory(name=shm_name0)
     shm1 = shared_memory.SharedMemory(name=shm_name1)
