@@ -4,12 +4,22 @@ doublehand_mp.py
 Multiprocess doublehand OSC mapping.
 
 Producer: captures frames from webcam into shared double buffer.
-Consumer: detects both hands, sends OSC messages:
-  - Left hand pinch  (index-thumb dist < 0.08) → /trigger 1
-  - Right hand pinch (index-thumb dist < 0.1)  → /frequency <f>, /volume <v>
+Consumer: detects both hands and streams every landmark over OSC.
+
+For each detected hand, 63 OSC messages are sent per frame — one per
+axis per MediaPipe joint, each carrying a single float:
+
+    /left_wrist_x            <float>
+    /left_wrist_y            <float>
+    /left_wrist_z            <float>
+    /left_thumb_cmc_x        <float>
+    ...
+    /right_pinky_tip_z       <float>
+
+x, y are normalized to [0, 1] (image-space); z is depth relative to the
+wrist (smaller = closer to camera).
 """
 
-import math
 import time
 import numpy as np
 import cv2
@@ -31,6 +41,19 @@ OSC_IP   = "127.0.0.1"
 OSC_PORT = 11111
 
 SHOW_PREVIEW = True   # set to False to disable the landmark preview window
+
+
+# ── MediaPipe hand joint names (index → name) ────────────────────────────────
+# Lowercase MediaPipe HandLandmark enum names — used to build OSC addresses
+# like /left_thumb_tip, /right_index_finger_mcp, etc.
+JOINT_NAMES = [
+    "wrist",
+    "thumb_cmc",        "thumb_mcp",        "thumb_ip",         "thumb_tip",
+    "index_finger_mcp", "index_finger_pip", "index_finger_dip", "index_finger_tip",
+    "middle_finger_mcp","middle_finger_pip","middle_finger_dip","middle_finger_tip",
+    "ring_finger_mcp",  "ring_finger_pip",  "ring_finger_dip",  "ring_finger_tip",
+    "pinky_mcp",        "pinky_pip",        "pinky_dip",        "pinky_tip",
+]
 
 
 # ── Drawing helpers ───────────────────────────────────────────────────────────
@@ -130,10 +153,7 @@ def consumer(shm_name0, shm_name1, cur_idx, stop_event, ts_value,
 
     time.sleep(0.5)  # warm-up
 
-    left_state  = 0   # hysteresis state for left-hand trigger
-    left_count  = 0
-
-    print("CONSUMER: starting doublehand detection — press Ctrl+C to stop.")
+    print("CONSUMER: streaming hand landmarks over OSC — press Ctrl+C to stop.")
 
     try:
         while not stop_event.is_set():
@@ -142,48 +162,18 @@ def consumer(shm_name0, shm_name1, cur_idx, stop_event, ts_value,
 
             hands = detector.detect_hand_pose(frame)
 
-            left_tapped = False
-
             if hands:
                 for hand in hands:
                     label = hand.get("label", "").lower()
-                    if not label:
+                    if label not in ("left", "right"):
                         continue
 
                     landmarks = hand["landmarks"].landmark
-
-                    if label == "left":
-                        index_pos = landmarks[8]
-                        thumb_pos = landmarks[4]
-                        dist = math.dist(
-                            [index_pos.x, index_pos.y],
-                            [thumb_pos.x, thumb_pos.y],
-                        )
-
-                        if dist >= 0.08 and left_state == 1:
-                            left_state = 0
-                        elif dist < 0.08 and left_state == 0:
-                            left_state  = 1
-                            left_tapped = True
-                            left_count += 1
-                            print(f"Left hand tap #{left_count}")
-
-                    elif label == "right":
-                        index_pos = landmarks[8]
-                        thumb_pos = landmarks[4]
-                        dist = math.dist(
-                            [index_pos.x, index_pos.y],
-                            [thumb_pos.x, thumb_pos.y],
-                        )
-
-                        if dist < 0.1:
-                            freq   = 100000 / ((index_pos.x ** 2) * 1000 + 100)
-                            volume = index_pos.y
-                            client.send_message("/frequency", freq)
-                            client.send_message("/volume",    volume)
-
-            if left_tapped:
-                client.send_message("/trigger", 1)
+                    for i, name in enumerate(JOINT_NAMES):
+                        lm = landmarks[i]
+                        client.send_message(f"/{label}_{name}_x", float(lm.x))
+                        client.send_message(f"/{label}_{name}_y", float(lm.y))
+                        client.send_message(f"/{label}_{name}_z", float(lm.z))
 
             if SHOW_PREVIEW:
                 preview = frame.copy()

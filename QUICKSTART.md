@@ -1,6 +1,6 @@
 # Quickstart
 
-This guide gets you from a blank machine to running hand-gesture-to-OSC mapping in a few minutes.
+This guide gets you from a blank machine to streaming hand-landmark data over OSC in a few minutes.
 
 ---
 
@@ -77,41 +77,52 @@ Press **`q`** in the preview window to quit cleanly.
 
 ---
 
-## What the hands do
+## What gets sent
 
-| Hand | Gesture | OSC message sent |
-|------|---------|-----------------|
-| **Left** | Pinch index + thumb together | `/trigger 1` (one shot per pinch) |
-| **Right** | Pinch index + thumb, then move hand | `/frequency <f>` and `/volume <v>` continuously |
+For every frame, each visible hand emits **63 OSC messages** — one per axis per MediaPipe joint, each carrying a single float:
+
+```
+/left_wrist_x              <float>   # 0.0 = left edge,  1.0 = right edge
+/left_wrist_y              <float>   # 0.0 = top edge,   1.0 = bottom edge
+/left_wrist_z              <float>   # depth, relative to wrist (≈0 at wrist)
+/left_thumb_cmc_x          <float>
+/left_thumb_cmc_y          <float>
+/left_thumb_cmc_z          <float>
+...
+/right_pinky_tip_z         <float>
+```
+
+The 21 joint names follow MediaPipe's `HandLandmark` enum (lowercased):
+
+```
+wrist,
+thumb_cmc, thumb_mcp, thumb_ip, thumb_tip,
+index_finger_mcp,  index_finger_pip,  index_finger_dip,  index_finger_tip,
+middle_finger_mcp, middle_finger_pip, middle_finger_dip, middle_finger_tip,
+ring_finger_mcp,   ring_finger_pip,   ring_finger_dip,   ring_finger_tip,
+pinky_mcp,         pinky_pip,         pinky_dip,         pinky_tip
+```
+
+So with both hands in frame you get up to **126 messages per frame**. Build your own mapping (frequency, volume, filter cutoff, anything) in your downstream patch by subscribing to whichever addresses you care about.
 
 ---
 
-## Tweaking the musical mapping (right hand)
+## Mapping coordinates to sound (in your patch)
 
-The two lines that turn hand position into sound are in [doublehand_mp.py](doublehand_mp.py) inside the `consumer()` function, in the `elif label == "right":` block:
+All values arrive as floats:
 
-```python
-freq   = 100000 / ((index_pos.x ** 2) * 1000 + 100)
-volume = index_pos.y
-```
+- **`x`** — horizontal position, `0.0` (left edge) → `1.0` (right edge)
+- **`y`** — vertical position, `0.0` (top edge) → `1.0` (bottom edge)
+- **`z`** — depth relative to the wrist; negative = toward the camera, positive = away. Magnitudes are small (roughly `-0.2` to `+0.2`) and not metric.
 
-- **`index_pos.x`** is the horizontal position of your index fingertip — `0.0` = left edge of frame, `1.0` = right edge.
-- **`index_pos.y`** is the vertical position — `0.0` = top of frame, `1.0` = bottom.
+A few starter ideas you can wire up in Pd/Max/SC:
 
-**`freq`** — the formula maps a wide horizontal sweep to a frequency range roughly 1 Hz – 1000 Hz (higher toward the left, lower toward the right). To change the range, adjust the constants:
+- **Pitch from horizontal index tip:** read `/right_index_finger_tip_x`, scale `0–1` to your desired frequency range (e.g. `200 + x*1800` for 200–2000 Hz).
+- **Volume from vertical:** read `/right_index_finger_tip_y` and invert (`1 - y`) so raising your hand makes it louder.
+- **Pinch as gate:** subscribe to both `/right_thumb_tip_x,y` and `/right_index_finger_tip_x,y`, compute distance in your patch, gate the synth when below a threshold.
+- **Two-hand control:** use left-hand joints for one synth parameter and right-hand joints for another — they're independent streams.
 
-```python
-# Example: linear map, 200 Hz on the left → 2000 Hz on the right
-freq = 200 + index_pos.x * 1800
-```
-
-**`volume`** — raw `y` means the top of frame is quietest (0.0) and the bottom is loudest (1.0). Flip it if you prefer top = loud:
-
-```python
-volume = 1.0 - index_pos.y
-```
-
-The pinch threshold that activates the right hand is the `dist < 0.1` check just above those lines. Increase `0.1` to trigger with a looser pinch, decrease it to require a tighter one.
+If you want to do the mapping *in Python instead of in the patch*, the place to add it is inside the `consumer()` function in [doublehand_mp.py](doublehand_mp.py), right where the per-landmark `client.send_message(...)` calls happen — replace or supplement them with whatever derived value you want to send.
 
 ---
 
