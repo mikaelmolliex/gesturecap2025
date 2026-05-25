@@ -170,11 +170,11 @@ def consumer(shm_name0, shm_name1, cur_idx, stop_event, ts_value,
                         continue
 
                     landmarks = hand["landmarks"].landmark
-                    for i, name in enumerate(JOINT_NAMES):
-                        lm = landmarks[i]
-                        client.send_message(f"/{label}_{name}_x", float(lm.x))
-                        client.send_message(f"/{label}_{name}_y", float(lm.y))
-                        client.send_message(f"/{label}_{name}_z", float(lm.z))
+                    values = []
+                    for lm in landmarks:
+                        values.extend([lm.x, lm.y, lm.z])
+
+                    client.send_message(f"/hand/{label}", values)
 
             if SHOW_PREVIEW:
                 preview = frame.copy()
