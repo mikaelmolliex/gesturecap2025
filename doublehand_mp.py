@@ -43,6 +43,15 @@ OSC_PORT = 11111
 SHOW_PREVIEW = True   # set to False to disable the landmark preview window
 
 
+# ==================================================
+# MIKAEL MODIFICATION
+# Camera mirroring (for Max UI testing)
+# Set FLIP to True to enable
+# ==================================================
+
+FLIP = True
+
+
 # ── MediaPipe hand joint names (index → name) ────────────────────────────────
 # Lowercase MediaPipe HandLandmark enum names — used to build OSC addresses
 # like /left_thumb_tip, /right_index_finger_mcp, etc.
@@ -159,20 +168,52 @@ def consumer(shm_name0, shm_name1, cur_idx, stop_event, ts_value,
     try:
         while not stop_event.is_set():
             read_idx = cur_idx.value
-            frame    = buf0.copy() if read_idx == 0 else buf1.copy()
+            frame = buf0.copy() if read_idx == 0 else buf1.copy()
+
+            # ==================================================
+            # MIKAEL MODIFICATION
+            # Apply horizontal flip if enabled
+            # Set FLIP = True to mirror the camera (like webcam apps)
+            if FLIP:
+                frame = cv2.flip(frame, 1)
+
 
             hands = detector.detect_hand_pose(frame)
 
             if hands:
                 for hand in hands:
-                    label = hand.get("label", "").lower()
+                    raw_label = hand.get("label", "").lower()
+
+                    # ==================================================
+                    # MIKAEL MODIFICATION
+                    # Adjust hand labels when camera is mirrored (FLIP)
+                    # This ensures OSC output matches user perspective
+                    # ==================================================
+                    if FLIP:
+                        label = "right" if raw_label == "left" else "left"
+                    else:
+                        label = raw_label
+
                     if label not in ("left", "right"):
                         continue
 
                     landmarks = hand["landmarks"].landmark
                     values = []
+
+                    # ==================================================
+                    # MIKAEL MODIFICATION
                     for lm in landmarks:
-                        values.extend([lm.x, lm.y, lm.z])
+                        # horizontal axis
+                        x = lm.x
+
+                        # vertical axis
+                        y = 1 - lm.y
+                        # 0 = bottom, 1 = top
+
+                        # depth (unchanged for now)
+                        z = -lm.z  # invert depth for more intuitive positive range
+
+                        values.extend([x, y, z])
 
                     client.send_message(f"/hand/{label}", values)
 
@@ -181,6 +222,17 @@ def consumer(shm_name0, shm_name1, cur_idx, stop_event, ts_value,
                 if hands:
                     for hand in hands:
                         label = hand.get("label", "").lower()
+
+                        # ==================================================
+                        # MIKAEL MODIFICATION
+                        # Invert hand labels when FLIP is enabled
+                        # ==================================================
+                        if FLIP:
+                            if label == "left":
+                                label = "right"
+                            elif label == "right":
+                                label = "left"
+
                         if label:
                             draw_hand(preview, hand["landmarks"].landmark, label)
 
